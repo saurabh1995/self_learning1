@@ -1,0 +1,16 @@
+# Python 3.10  (conda create -n self_learning python=3.10)
+# Versions of the environment the results in README.md were produced with.
+tensorflow==2.10.0          # last TF release with native GPU support on Windows (CUDA 11.2 / cuDNN 8.1); CPU is enough
+keras==2.10.0
+numpy==1.26.4               # TF 2.10 does not work with numpy >= 2
+protobuf==3.19.6            # newer protobuf breaks TF 2.10
+scipy==1.15.3
+scikit-learn==1.7.2
+sympy==1.14.0
+pandas==2.3.3
+matplotlib==3.10.9
+h5py==3.14.0
+tensorflow-addons==0.19.0   # only imported by the original notebooks
+keras-lmu==0.5.0            # only imported by the original notebooks
+ipykernel==7.3.0
+notebook                    # Jupyter (also provides nbconvert for headless execution)
