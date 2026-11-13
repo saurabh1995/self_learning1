@@ -84,4 +84,5 @@ the generated notebooks, when the change should apply to both.
 `Effort_towards_*.ipynb`: earlier explicit-integration variants (with isotropic damage, own RSNN/DSNN classes,
 untrained network, reads `strain44111.csv` from another path).
 
-`.ipynb_checkpoints/` and `__pycache__/` are tracked in git.
+`.ipynb_checkpoints/` and `__pycache__/` are git-ignored (they were tracked until the `.gitignore` was added; older
+commits still contain them).
