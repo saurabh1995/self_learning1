@@ -9,6 +9,9 @@ Usage (from any directory):
 Defaults written into the configuration cell (optional environment variables):
     GEN_USE_XLA    = True | False                   (default True)
     GEN_ADAM_RESET = 'solve' | 'increment' | 'never'  (default 'never')
+    GEN_INCREMENTS = number of time increments          (default 10, at most 30 with 'file')
+    GEN_STRAIN_PATH = 'file' | 'constant'               (default 'file': actual increments row t - row t-1;
+                                                         'constant': row 0 every step as in the original notebook)
 
 Copied verbatim (checked by asserts):
     - material-model cell 5 of Self_learning_Loeser_plastiche_dehnung_berechnung.ipynb
@@ -96,7 +99,10 @@ code(r"""# 1. Configuration  -- adapt the paths to your machine
 
 # Integration points (l, m, n) to integrate; all 45 of element 1: [(l, m, n) for l in range(3) for m in range(3) for n in range(5)]
 POINTS       = [(0, 0, 0)]
-INCREMENTS   = 15        # time increments (as in the original notebook)
+INCREMENTS   = """ + os.environ.get('GEN_INCREMENTS', '10') + r"""        # time increments (the strain files hold 30 rows; the original notebook ran 15)
+STRAIN_PATH  = '""" + os.environ.get('GEN_STRAIN_PATH', 'file') + r"""'    # 'file': actual increment of step t = row t - row t-1 of strain1<l><m><n>.csv (cumulative strains,
+                         #         cyclic: loading rows 0-9, load reversal from row 10)
+                         # 'constant': row 0 at every step (as in the original notebook -> monotonic constant-increment loading)
 LR           = 0.003     # Adam learning rate of the online optimisation (as in the original)
 USE_XLA      = """ + os.environ.get('GEN_USE_XLA', 'True') + r"""      # compile the optimisation loop with XLA (tf.function(jit_compile=True))
 ADAM_RESET   = '""" + os.environ.get('GEN_ADAM_RESET', 'never') + r"""'   # when Adam's moments/step counter are reset: 'solve' (every solve, as in the original),
@@ -306,10 +312,19 @@ def run(solver, flow='Z/J'):
         for s in STATE_KEYS:
             mp[s + str(i+1) + str(l+1) + str(m+1) + str(n+1)] = tf.zeros(shape=(1, STATE_UNITS))
     log = []
+    # cumulative total strains per point (rows = time steps); increment of step t = row t - row t-1
+    strain_rows = {(l, m, n): np.genfromtxt(os.path.join(STRAIN_DIR, 'strain1' + str(l+1) + str(m+1) + str(n+1) + '.csv'))
+                   for (l, m, n) in POINTS}
+    if STRAIN_PATH == 'file':
+        assert all(INCREMENTS <= len(v) for v in strain_rows.values()), 'INCREMENTS exceeds the rows of the strain file'
     for t in range(INCREMENTS):
         for (l, m, n) in POINTS:
-            key = str(i+1) + str(l+1) + str(m+1) + str(n+1)
-            mp['delta_eps'+key]       = np.genfromtxt(os.path.join(STRAIN_DIR, 'strain1' + str(l+1) + str(m+1) + str(n+1) + '.csv'))[0]
+            key  = str(i+1) + str(l+1) + str(m+1) + str(n+1)
+            rows = strain_rows[(l, m, n)]
+            if STRAIN_PATH == 'file':
+                mp['delta_eps'+key]   = rows[t] - rows[t-1] if t > 0 else rows[0].copy()
+            else:
+                mp['delta_eps'+key]   = rows[0].copy()
             mp['stress_n-1'+key]      = mp['stress_n'+key].copy()
             sig_tr_i_1                = mp['stress_n'+key] + mp['C'+key].dot(mp['delta_eps'+key])
             mp['stress_back_n-1'+key] = mp['stress_back'+key].copy()
@@ -380,7 +395,7 @@ code("""reset_last_layer()
 _t0 = time.perf_counter(); mp_nn, log_nn = run('nn');               time_run_nn = time.perf_counter() - _t0
 _t0 = time.perf_counter(); mp_cl, log_cl = run('classical');        time_run_cl = time.perf_counter() - _t0
 mp_ch, log_ch = run('classical', flow='Z/h')   # original self-learning formulation Z/h, for reference
-print(f'settings            : USE_XLA={USE_XLA}, ADAM_RESET={ADAM_RESET!r}, LR={LR}')
+print(f'settings            : USE_XLA={USE_XLA}, ADAM_RESET={ADAM_RESET!r}, LR={LR}, INCREMENTS={INCREMENTS}, STRAIN_PATH={STRAIN_PATH!r}')
 print(f'NN (last layer) run : {time_run_nn:8.2f} s  ({len(log_nn)} solves)')
 print(f'Classical run       : {time_run_cl:8.2f} s  ({len(log_cl)} solves)')""")
 
