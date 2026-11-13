@@ -9,7 +9,8 @@ Usage (from any directory):
 Defaults written into the configuration cell (optional environment variables):
     GEN_USE_XLA    = True | False                   (default True)
     GEN_ADAM_RESET = 'solve' | 'increment' | 'never'  (default 'never')
-    GEN_INCREMENTS = number of time increments          (default 10, at most 30 with 'file')
+    GEN_INCREMENTS = number of time increments          (default 30, at most 30 with 'file')
+    GEN_TOL        = NN stop criterion residual**2 < TOL (default 1e-9; original notebook 1e-7)
     GEN_STRAIN_PATH = 'file' | 'constant'               (default 'file': actual increments row t - row t-1;
                                                          'constant': row 0 every step as in the original notebook)
 
@@ -99,7 +100,7 @@ code(r"""# 1. Configuration  -- adapt the paths to your machine
 
 # Integration points (l, m, n) to integrate; all 45 of element 1: [(l, m, n) for l in range(3) for m in range(3) for n in range(5)]
 POINTS       = [(0, 0, 0)]
-INCREMENTS   = """ + os.environ.get('GEN_INCREMENTS', '10') + r"""        # time increments (the strain files hold 30 rows; the original notebook ran 15)
+INCREMENTS   = """ + os.environ.get('GEN_INCREMENTS', '30') + r"""      # time increments (the strain files hold 30 rows; the original notebook ran 15)
 STRAIN_PATH  = '""" + os.environ.get('GEN_STRAIN_PATH', 'file') + r"""'    # 'file': actual increment of step t = row t - row t-1 of strain1<l><m><n>.csv (cumulative strains,
                          #         cyclic: loading rows 0-9, load reversal from row 10)
                          # 'constant': row 0 at every step (as in the original notebook -> monotonic constant-increment loading)
@@ -107,7 +108,8 @@ LR           = 0.003     # Adam learning rate of the online optimisation (as in 
 USE_XLA      = """ + os.environ.get('GEN_USE_XLA', 'True') + r"""      # compile the optimisation loop with XLA (tf.function(jit_compile=True))
 ADAM_RESET   = '""" + os.environ.get('GEN_ADAM_RESET', 'never') + r"""'   # when Adam's moments/step counter are reset: 'solve' (every solve, as in the original),
                          # 'increment' (first solve of each increment), 'never' (only at the start of a run)
-TOL         = 1e-7      # convergence: residual**2 < TOL (as in the original)
+TOL          = """ + os.environ.get('GEN_TOL', '1e-9') + r"""      # convergence of the NN solve: residual**2 < TOL  (original notebook: 1e-7, i.e. |r| < 3.2e-4 MPa;
+                         # 1e-9 -> |r| < 3.2e-5 MPa; the classical solver stops at |r| < 1e-7 MPa)
 MAX_ITER_P0  = 5000      # max optimiser steps in the first plane-stress iteration (as in the original)
 MAX_ITER     = 1000      # max optimiser steps in later plane-stress iterations (as in the original)""")
 
@@ -395,7 +397,7 @@ code("""reset_last_layer()
 _t0 = time.perf_counter(); mp_nn, log_nn = run('nn');               time_run_nn = time.perf_counter() - _t0
 _t0 = time.perf_counter(); mp_cl, log_cl = run('classical');        time_run_cl = time.perf_counter() - _t0
 mp_ch, log_ch = run('classical', flow='Z/h')   # original self-learning formulation Z/h, for reference
-print(f'settings            : USE_XLA={USE_XLA}, ADAM_RESET={ADAM_RESET!r}, LR={LR}, INCREMENTS={INCREMENTS}, STRAIN_PATH={STRAIN_PATH!r}')
+print(f'settings            : USE_XLA={USE_XLA}, ADAM_RESET={ADAM_RESET!r}, LR={LR}, INCREMENTS={INCREMENTS}, STRAIN_PATH={STRAIN_PATH!r}, TOL={TOL}')
 print(f'NN (last layer) run : {time_run_nn:8.2f} s  ({len(log_nn)} solves)')
 print(f'Classical run       : {time_run_cl:8.2f} s  ({len(log_cl)} solves)')""")
 
