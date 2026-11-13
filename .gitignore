@@ -4,3 +4,6 @@ __pycache__/
 
 # Jupyter autosave checkpoints
 .ipynb_checkpoints/
+
+# Local Claude Code instructions (kept out of the repository)
+CLAUDE.md
