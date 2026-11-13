@@ -11,6 +11,7 @@ Defaults written into the configuration cell (optional environment variables):
     GEN_ADAM_RESET = 'solve' | 'increment' | 'never'  (default 'never')
     GEN_INCREMENTS = number of time increments          (default 30, at most 30 with 'file')
     GEN_TOL        = NN stop criterion residual**2 < TOL (default 1e-9; original notebook 1e-7)
+    GEN_ELEMENT    = BVP element whose strain<element><l><m><n>.csv files are used (default 1)
     GEN_STRAIN_PATH = 'file' | 'constant'               (default 'file': actual increments row t - row t-1;
                                                          'constant': row 0 every step as in the original notebook)
 
@@ -96,9 +97,10 @@ UNITS        = 32        # units per SimpleRNN layer
 r"""WEIGHTS_PATH = r"C:\Users\Tandale\sciebo\olddata\PostDoc\Writing\Meta_Learning\Trained_Model\meta_pretrainiertes_model\meta_weights_HSNN_up_different_scaling_more_innerloop.pkl"
 """)
 code(r"""# 1. Configuration  -- adapt the paths to your machine
-""" + net_config + r"""STRAIN_DIR   = r"C:\Users\Tandale\sciebo\olddata\Phd\Writing\SLMU_paper\BVPs\Stress-Strain_Data_csv\BVP4_100_els"   # strain1<l><m><n>.csv
+""" + net_config + r"""STRAIN_DIR   = r"C:\Users\Tandale\sciebo\olddata\Phd\Writing\SLMU_paper\BVPs\Stress-Strain_Data_csv\BVP4_100_els"   # strain<element><l><m><n>.csv
+ELEMENT      = """ + os.environ.get('GEN_ELEMENT', '1') + r"""         # element of the BVP whose strain files are used (1...100), e.g. 44 -> strain44<l><m><n>.csv
 
-# Integration points (l, m, n) to integrate; all 45 of element 1: [(l, m, n) for l in range(3) for m in range(3) for n in range(5)]
+# Integration points (l, m, n) to integrate; all 45 of an element: [(l, m, n) for l in range(3) for m in range(3) for n in range(5)]
 POINTS       = [(0, 0, 0)]
 INCREMENTS   = """ + os.environ.get('GEN_INCREMENTS', '30') + r"""      # time increments (the strain files hold 30 rows; the original notebook ran 15)
 STRAIN_PATH  = '""" + os.environ.get('GEN_STRAIN_PATH', 'file') + r"""'    # 'file': actual increment of step t = row t - row t-1 of strain1<l><m><n>.csv (cumulative strains,
@@ -110,8 +112,8 @@ ADAM_RESET   = '""" + os.environ.get('GEN_ADAM_RESET', 'never') + r"""'   # when
                          # 'increment' (first solve of each increment), 'never' (only at the start of a run)
 TOL          = """ + os.environ.get('GEN_TOL', '1e-9') + r"""      # convergence of the NN solve: residual**2 < TOL  (original notebook: 1e-7, i.e. |r| < 3.2e-4 MPa;
                          # 1e-9 -> |r| < 3.2e-5 MPa; the classical solver stops at |r| < 1e-7 MPa)
-MAX_ITER_P0  = 5000      # max optimiser steps in the first plane-stress iteration (as in the original)
-MAX_ITER     = 1000      # max optimiser steps in later plane-stress iterations (as in the original)""")
+MAX_ITER     = 5000      # max optimiser steps per solve, the same for every solve: XLA compiles once per distinct value
+                         # (the original used 5000 in the first and 1000 in later plane-stress iterations -> 2 compiles)""")
 
 md("# 1. Network: frozen feature extractor + trainable last layer")
 if ARCH == 'simple_rnn':
@@ -315,7 +317,7 @@ def run(solver, flow='Z/J'):
             mp[s + str(i+1) + str(l+1) + str(m+1) + str(n+1)] = tf.zeros(shape=(1, STATE_UNITS))
     log = []
     # cumulative total strains per point (rows = time steps); increment of step t = row t - row t-1
-    strain_rows = {(l, m, n): np.genfromtxt(os.path.join(STRAIN_DIR, 'strain1' + str(l+1) + str(m+1) + str(n+1) + '.csv'))
+    strain_rows = {(l, m, n): np.genfromtxt(os.path.join(STRAIN_DIR, 'strain' + str(ELEMENT) + str(l+1) + str(m+1) + str(n+1) + '.csv'))
                    for (l, m, n) in POINTS}
     if STRAIN_PATH == 'file':
         assert all(INCREMENTS <= len(v) for v in strain_rows.values()), 'INCREMENTS exceeds the rows of the strain file'
@@ -355,7 +357,7 @@ def run(solver, flow='Z/J'):
                     else:
                         sigma_33_trial = sig_tr_i_1[2]
                         Delta_pl, N_plas, new_states = local_solve(solver, flow, mp, key, l, m, n, stress_dev_trial, stress_back_trial,
-                                                                   stress_eqv_trial, state_inputs, MAX_ITER_P0, log, t, p)
+                                                                   stress_eqv_trial, state_inputs, MAX_ITER, log, t, p)
                         sigma_i_1             = sigma_33_trial - (3 * mp['mu'+key] * Delta_pl) * N_plas[2][2]
                         sigma_i               = sigma_i_1
                         delta_eps33_i_minus_1 = mp['delta_eps'+key][2]
@@ -398,6 +400,7 @@ _t0 = time.perf_counter(); mp_nn, log_nn = run('nn');               time_run_nn 
 _t0 = time.perf_counter(); mp_cl, log_cl = run('classical');        time_run_cl = time.perf_counter() - _t0
 mp_ch, log_ch = run('classical', flow='Z/h')   # original self-learning formulation Z/h, for reference
 print(f'settings            : USE_XLA={USE_XLA}, ADAM_RESET={ADAM_RESET!r}, LR={LR}, INCREMENTS={INCREMENTS}, STRAIN_PATH={STRAIN_PATH!r}, TOL={TOL}')
+print(f'strain files        : element {ELEMENT}, points ' + ', '.join(f'strain{ELEMENT}{l+1}{m+1}{n+1}.csv' for (l, m, n) in POINTS))
 print(f'NN (last layer) run : {time_run_nn:8.2f} s  ({len(log_nn)} solves)')
 print(f'Classical run       : {time_run_cl:8.2f} s  ({len(log_cl)} solves)')""")
 
@@ -409,12 +412,18 @@ print('solves                    :', len(df))
 print('converged (res^2 < TOL)   :', int(df.converged.sum()), '/', len(df))
 print('optimiser steps  mean/max :', round(df.iters.mean(), 1), '/', df.iters.max())
 print('rel. error Δε_p  max      : %.2e' % df.rel_err.max())
-# the first call with each max_iter value (MAX_ITER_P0 / MAX_ITER) traces the graph (and compiles it with XLA)
-warm = ~df.index.isin([df.index[df.p == 1][0], df.index[df.p > 1][0]])
-print('time per solve   NN       : median %.3f ms, mean %.3f ms (features + graph loop, without the 2 compile calls)'
-      % (1e3 * df.time_nn[warm].median(), 1e3 * df.time_nn[warm].mean()))
-print('time per solve   classical: median %.3f ms' % (1e3 * df.time_classical.median()))
-print('compile calls (one per max_iter value): %s ms' % ', '.join('%.0f' % (1e3 * v) for v in df.time_nn[~warm]))
+# Timing per solve: time_nn and time_classical are measured on the SAME solve (same trial state) in the NN run.
+# The first NN call traces the graph and compiles it with XLA -> excluded from the comparison for BOTH solvers.
+df['speedup'] = df.time_classical / df.time_nn          # > 1: NN faster on this solve
+cmp = df.iloc[1:]
+print('compile call (1st NN solve)          : %.0f ms (excluded below)' % (1e3 * df.time_nn.iloc[0]))
+slow = cmp.index[cmp.time_nn > 0.05]
+print('other NN calls > 50 ms (recompiles?) :', 'none' if len(slow) == 0 else list(slow))
+print('time per solve (same %d solves)       : NN median %.3f ms / mean %.3f ms   classical median %.3f ms / mean %.3f ms'
+      % (len(cmp), 1e3 * cmp.time_nn.median(), 1e3 * cmp.time_nn.mean(),
+         1e3 * cmp.time_classical.median(), 1e3 * cmp.time_classical.mean()))
+print('per-solve ratio t_classical / t_NN    : median %.2f, min %.2f, max %.2f; NN faster in %d of %d solves'
+      % (cmp.speedup.median(), cmp.speedup.min(), cmp.speedup.max(), int((cmp.speedup > 1).sum()), len(cmp)))
 for (l, m, n) in POINTS:
     key = str(i+1) + str(l+1) + str(m+1) + str(n+1)
     s_nn, s_cl = np.array(mp_nn['abs_stress'+key]), np.array(mp_cl['abs_stress'+key])
@@ -424,7 +433,8 @@ for (l, m, n) in POINTS:
     print(f'point {key}: original Z/h vs Z/J (classical solver both): max |Δσ| = {np.abs(s_ch - s_cl).max():.3e} MPa,'
           f' EQPLAS {mp_ch["EQPLAS"+key]:.6e} vs {mp_cl["EQPLAS"+key]:.6e}')
 print('alpha_N at the solves     : min %.4f  max %.4f' % (df.alpha.min(), df.alpha.max()))
-df[['t', 'p', 'D_nn', 'D_classical', 'rel_err', 'loss', 'iters', 'time_nn', 'time_classical']]""")
+pd.set_option('display.max_rows', 500)
+df[['t', 'p', 'D_nn', 'D_classical', 'rel_err', 'loss', 'iters', 'time_nn', 'time_classical', 'speedup']]""")
 
 code("""fig, axs = plt.subplots(1, 2, figsize=(12, 4))
 for (l, m, n) in POINTS:

@@ -78,8 +78,9 @@ the generated notebooks, when the change should apply to both.
   strain update, so the comparison isolates the local solver. Summary cell reports per-solve timing and Δε_p/σ errors.
 - Performance facts: run on CPU (`USE_GPU=False`, GPU is ~8× slower for this scalar loop); without XLA each Adam
   step costs ~110 µs, with XLA the ~100 steps are nearly free and a solve is ~0.9 ms (classical pure-Python solver
-  ~1.0 ms). XLA compiles once per distinct `max_iter` value (5000 for `p==0`, 1000 otherwise, ~2 s total), so
-  exclude those calls when timing.
+  ~1.0 ms). XLA compiles once per distinct `max_iter` value, so all solves use one `MAX_ITER` (5000) → a single
+  compile (~1.4 s) in the first NN solve, which the summary excludes. `time_nn` and `time_classical` are measured
+  on the same solve (same trial state) in the NN run and compared solve by solve (`speedup` column).
 
 `Effort_towards_*.ipynb`: earlier explicit-integration variants (with isotropic damage, own RSNN/DSNN classes,
 untrained network, reads `strain44111.csv` from another path).
